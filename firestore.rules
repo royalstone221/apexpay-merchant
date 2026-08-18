@@ -20,9 +20,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /publicMerchants/{merchantId} {
+      allow read: if true;
+      allow create, update: if merchantExists()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.merchantId == merchantId
+        && get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.merchantId == merchantId
+        && request.resource.data.businessName == get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.businessName
+        && request.resource.data.status == get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.status
+        && request.resource.data.currency == 'APX';
+      allow delete: if false;
+    }
+
     match /paymentIntents/{paymentId} {
       allow create: if merchantExists()
         && request.resource.data.merchantUid == request.auth.uid
+        && request.resource.data.merchantId == get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.merchantId
         && request.resource.data.status == 'pending'
         && request.resource.data.currency == 'APX'
         && request.resource.data.amount is number
@@ -33,7 +46,7 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Reserved for the future shared wallet/ledger service. Client writes are denied.
+    // Reserved for the future shared wallet/ledger service. Browsers cannot alter these collections.
     match /wallets/{id} { allow read, write: if false; }
     match /ledgerEntries/{id} { allow read, write: if false; }
     match /transactions/{id} { allow read, write: if false; }
