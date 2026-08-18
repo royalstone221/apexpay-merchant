@@ -14,24 +14,16 @@ service cloud.firestore {
         && request.resource.data.status == 'active'
         && request.resource.data.environment == 'sandbox'
         && request.resource.data.currency == 'APX'
-        && request.resource.data.protocolVersion == '1.0'
-        && request.resource.data.availableBalanceMinor == 0
-        && request.resource.data.pendingBalanceMinor == 0;
-
+        && request.resource.data.protocolVersion == '1.0';
       allow get: if isOwner(uid);
       allow list: if false;
-
-      // Merchants may edit profile-safe fields only. Financial and identity fields
-      // cannot be changed by the merchant browser.
       allow update: if isOwner(uid)
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.merchantId == resource.data.merchantId
         && request.resource.data.status == resource.data.status
         && request.resource.data.environment == resource.data.environment
         && request.resource.data.currency == resource.data.currency
-        && request.resource.data.protocolVersion == resource.data.protocolVersion
-        && request.resource.data.availableBalanceMinor == resource.data.availableBalanceMinor
-        && request.resource.data.pendingBalanceMinor == resource.data.pendingBalanceMinor;
+        && request.resource.data.protocolVersion == resource.data.protocolVersion;
       allow delete: if false;
     }
 
@@ -49,6 +41,24 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /wallets/{uid} {
+      // Every app may bootstrap only its own empty wallet. There is no client-side
+      // operation that can choose an opening balance.
+      allow create: if isOwner(uid)
+        && request.resource.data.ownerUid == request.auth.uid
+        && (request.resource.data.ownerType == 'merchant' || request.resource.data.ownerType == 'customer')
+        && request.resource.data.currency == 'APX'
+        && request.resource.data.availableBalanceMinor == 0
+        && request.resource.data.pendingBalanceMinor == 0
+        && request.resource.data.status == 'active'
+        && request.resource.data.protocolVersion == '1.0';
+      allow get: if isOwner(uid);
+      allow list: if false;
+      // Balance movement is intentionally disabled until the atomic Wallet settlement
+      // contract is deployed. Profile clients cannot update wallet documents.
+      allow update, delete: if false;
+    }
+
     match /paymentIntents/{paymentId} {
       allow create: if merchantExists()
         && request.resource.data.merchantUid == request.auth.uid
@@ -63,23 +73,15 @@ service cloud.firestore {
         && request.resource.data.reference.size() <= 120
         && request.resource.data.token is string
         && request.resource.data.token.size() >= 32;
-
-      // Specific open checkout records may be retrieved by their random document ID.
-      // Collection enumeration stays private to the owning merchant.
       allow get: if (merchantExists() && resource.data.merchantUid == request.auth.uid)
         || isOpenPaymentStatus(resource.data.status);
       allow list: if merchantExists() && resource.data.merchantUid == request.auth.uid;
-
-      // Merchant clients cannot mark themselves paid, settle, reverse, or alter amounts.
-      // Wallet/ledger settlement will use separately constrained shared-domain writes.
       allow update, delete: if false;
     }
 
-    // Shared financial domains. V1 Merchant is read/write denied here by design.
-    // These domains are consumed by the separate Wallet and Admin applications under
-    // their own narrowly scoped rules; merchant JavaScript never receives authority.
+    // Canonical financial history remains immutable/unavailable to ordinary clients
+    // until the Wallet settlement rule set is installed.
     match /customers/{id} { allow read, write: if false; }
-    match /wallets/{id} { allow read, write: if false; }
     match /transactions/{id} { allow read, write: if false; }
     match /ledgerEntries/{id} { allow read, write: if false; }
     match /treasuryOperations/{id} { allow read, write: if false; }
