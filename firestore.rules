@@ -11,18 +11,24 @@ service cloud.firestore {
 
     match /merchants/{merchantId} {
       allow create: if ownsMerchant(merchantId)
-        && request.resource.data.keys().hasOnly(['businessName', 'email', 'createdAt'])
         && request.resource.data.businessName is string
         && request.resource.data.businessName.size() >= 2
         && request.resource.data.businessName.size() <= 120
-        && request.resource.data.email == request.auth.token.email;
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.currency == 'APX'
+        && request.resource.data.status == 'active';
 
       allow read: if ownsMerchant(merchantId);
 
       allow update: if ownsMerchant(merchantId)
         && request.resource.data.email == resource.data.email
         && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['businessName']);
+        && request.resource.data.currency == resource.data.currency
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'businessName', 'contactName', 'supportEmail', 'phone', 'category',
+          'publicKey', 'updatedAt'
+        ]);
 
       allow delete: if false;
     }
@@ -31,9 +37,6 @@ service cloud.firestore {
       allow read: if ownsMerchant(merchantId);
 
       allow create: if ownsMerchant(merchantId)
-        && request.resource.data.keys().hasOnly([
-          'title', 'amount', 'currency', 'status', 'createdAt', 'merchantId'
-        ])
         && request.resource.data.merchantId == merchantId
         && request.resource.data.title is string
         && request.resource.data.title.size() >= 1
@@ -46,8 +49,9 @@ service cloud.firestore {
       allow update: if ownsMerchant(merchantId)
         && request.resource.data.merchantId == resource.data.merchantId
         && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.currency == resource.data.currency
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'title', 'amount', 'status'
+          'title', 'description', 'amount', 'status', 'updatedAt'
         ])
         && request.resource.data.amount is number
         && request.resource.data.amount > 0
@@ -56,9 +60,38 @@ service cloud.firestore {
       allow delete: if ownsMerchant(merchantId);
     }
 
+    match /merchants/{merchantId}/customers/{customerId} {
+      allow read: if ownsMerchant(merchantId);
+      allow create: if ownsMerchant(merchantId)
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 120;
+      allow update: if ownsMerchant(merchantId)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'email', 'phone', 'updatedAt'
+        ]);
+      allow delete: if ownsMerchant(merchantId);
+    }
+
+    // The merchant frontend may inspect its ledger, but never create, edit,
+    // reverse, settle, approve, or delete transaction records.
     match /merchants/{merchantId}/transactions/{transactionId} {
       allow read: if ownsMerchant(merchantId);
       allow write: if false;
+    }
+
+    // Shared financial collections are intentionally blocked from this client.
+    // The future trusted Wallet/Admin transaction layer will write them using
+    // privileged server credentials, not Firestore browser rules.
+    match /wallets/{walletId} {
+      allow read, write: if false;
+    }
+    match /ledger/{entryId} {
+      allow read, write: if false;
+    }
+    match /moneyOperations/{operationId} {
+      allow read, write: if false;
     }
 
     match /{document=**} {
