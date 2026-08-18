@@ -1,16 +1,23 @@
 import { auth, db } from './firebase.js';
+import { APEXPAY_PROTOCOL, toMinorUnits, formatAPXMinor, createReference } from './protocol.js';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js';
 import { doc, setDoc, getDoc, collection, addDoc, query, where, orderBy, getDocs, serverTimestamp, limit } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const money = (n) => Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 let merchant = null;
 let currentPayments = [];
 
 function toast(message){const t=$('#toast');t.textContent=message;t.classList.add('show');clearTimeout(window.__toast);window.__toast=setTimeout(()=>t.classList.remove('show'),2600)}
 function merchantCode(uid){return `APX_${uid.slice(0,6).toUpperCase()}_${uid.slice(-4).toUpperCase()}`}
-function randomToken(){return crypto.getRandomValues(new Uint32Array(3)).join('').slice(0,18)}
+function randomToken(){return Array.from(crypto.getRandomValues(new Uint8Array(18)),b=>b.toString(16).padStart(2,'0')).join('')}
+function stateLabel(value){return String(value||'created').replaceAll('_',' ').toUpperCase()}
+function displayAmount(payment){
+  if(Number.isSafeInteger(payment.amountMinor)) return formatAPXMinor(payment.amountMinor);
+  // Temporary compatibility for any old sandbox documents created before protocol v1.
+  const legacy=Number(payment.amount||0);
+  return `${APEXPAY_PROTOCOL.currency.code} ${legacy.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+}
 
 $$('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>{
   $$('[data-auth-tab]').forEach(x=>x.classList.toggle('active',x===btn));
@@ -24,7 +31,8 @@ async function ensurePublicMerchant(uid,data){
     merchantId:data.merchantId,
     businessName:data.businessName,
     status:data.status,
-    currency:data.currency || 'APX'
+    currency:APEXPAY_PROTOCOL.currency.code,
+    protocolVersion:APEXPAY_PROTOCOL.version
   },{merge:true});
 }
 
@@ -36,7 +44,11 @@ $('#registerForm').addEventListener('submit',async(e)=>{
   try{
     const cred=await createUserWithEmailAndPassword(auth,email,password);
     const merchantId=merchantCode(cred.user.uid);
-    const data={ownerUid:cred.user.uid,businessName,email,merchantId,status:'active',environment:'sandbox',currency:'APX',balance:0,createdAt:serverTimestamp()};
+    const data={
+      ownerUid:cred.user.uid,businessName,email,merchantId,status:'active',environment:'sandbox',
+      currency:APEXPAY_PROTOCOL.currency.code,availableBalanceMinor:0,pendingBalanceMinor:0,
+      protocolVersion:APEXPAY_PROTOCOL.version,createdAt:serverTimestamp()
+    };
     await setDoc(doc(db,'merchants',cred.user.uid),data);
     await ensurePublicMerchant(cred.user.uid,data);
     toast('Merchant account created');
@@ -63,7 +75,7 @@ function bindMerchant(){
   const name=merchant.businessName||'Merchant';
   $('#merchantName').textContent=name;$('#merchantInitial').textContent=name[0].toUpperCase();$('#merchantId').textContent=merchant.merchantId;
   $('#settingsBusinessName').textContent=name;$('#settingsEmail').textContent=merchant.email;$('#settingsMerchantId').textContent=merchant.merchantId;
-  $('#balance').textContent=money(merchant.balance);
+  $('#balance').textContent=formatAPXMinor(Number.isSafeInteger(merchant.availableBalanceMinor)?merchant.availableBalanceMinor:0).replace('APX ','');
   $('#integrationCode').textContent=`ApexPay.open({\n  merchantId: '${merchant.merchantId}',\n  amount: 100.00,\n  reference: 'ORDER-1001'\n});`;
 }
 
@@ -85,25 +97,32 @@ async function loadPayments(){
 $('#refreshPayments').addEventListener('click',loadPayments);
 
 function renderPayments(){
-  const successful=currentPayments.filter(x=>x.status==='success');
-  const pending=currentPayments.filter(x=>x.status==='pending');
-  $('#successCount').textContent=successful.length;$('#pendingCount').textContent=pending.length;
-  $('#volume').textContent=`APX ${money(successful.reduce((a,b)=>a+Number(b.amount||0),0))}`;
-  const rows=currentPayments.map(p=>`<tr><td><strong>${escapeHtml(p.reference||'—')}</strong></td><td>${escapeHtml(p.title||'Payment')}</td><td>APX ${money(p.amount)}</td><td><span class="status ${p.status||'pending'}">${escapeHtml((p.status||'pending').toUpperCase())}</span></td><td>${p.createdAt?.toDate?p.createdAt.toDate().toLocaleString():'Just now'}</td></tr>`).join('');
+  const settled=currentPayments.filter(x=>x.status===APEXPAY_PROTOCOL.paymentStates.SETTLED);
+  const open=currentPayments.filter(x=>[APEXPAY_PROTOCOL.paymentStates.CREATED,APEXPAY_PROTOCOL.paymentStates.AWAITING_CUSTOMER,APEXPAY_PROTOCOL.paymentStates.AUTHORIZED,APEXPAY_PROTOCOL.paymentStates.PROCESSING].includes(x.status));
+  $('#successCount').textContent=settled.length;$('#pendingCount').textContent=open.length;
+  $('#volume').textContent=formatAPXMinor(settled.reduce((sum,p)=>sum+(Number.isSafeInteger(p.amountMinor)?p.amountMinor:Math.round(Number(p.amount||0)*100)),0));
+  const rows=currentPayments.map(p=>`<tr><td><strong>${escapeHtml(p.reference||'—')}</strong></td><td>${escapeHtml(p.title||'Payment')}</td><td>${displayAmount(p)}</td><td><span class="status ${p.status||'created'}">${escapeHtml(stateLabel(p.status))}</span></td><td>${p.createdAt?.toDate?p.createdAt.toDate().toLocaleString():'Just now'}</td></tr>`).join('');
   const table=rows?`<table class="payment-table"><thead><tr><th>Reference</th><th>Description</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="empty-box">No payment activity yet.</div>';
   $('#paymentsTable').innerHTML=table;
-  $('#recentPayments').innerHTML=rows?`<table class="payment-table"><thead><tr><th>Reference</th><th>Amount</th><th>Status</th></tr></thead><tbody>${currentPayments.slice(0,5).map(p=>`<tr><td>${escapeHtml(p.reference||'—')}</td><td>APX ${money(p.amount)}</td><td><span class="status ${p.status||'pending'}">${escapeHtml((p.status||'pending').toUpperCase())}</span></td></tr>`).join('')}</tbody></table>`:'<div class="empty-box">Your first payment will appear here.</div>';
+  $('#recentPayments').innerHTML=rows?`<table class="payment-table"><thead><tr><th>Reference</th><th>Amount</th><th>Status</th></tr></thead><tbody>${currentPayments.slice(0,5).map(p=>`<tr><td>${escapeHtml(p.reference||'—')}</td><td>${displayAmount(p)}</td><td><span class="status ${p.status||'created'}">${escapeHtml(stateLabel(p.status))}</span></td></tr>`).join('')}</tbody></table>`:'<div class="empty-box">Your first payment will appear here.</div>';
 }
 
 $('#paymentLinkForm').addEventListener('submit',async(e)=>{
   e.preventDefault();if(!merchant)return;
-  const amount=Number($('#linkAmount').value);if(!Number.isFinite(amount)||amount<=0)return toast('Enter a valid amount');
+  let amountMinor;
+  try{amountMinor=toMinorUnits($('#linkAmount').value)}catch(err){return toast(err.message)}
   const token=randomToken();
-  const payload={merchantUid:merchant.uid,merchantId:merchant.merchantId,merchantName:merchant.businessName,title:$('#linkTitle').value.trim(),amount,reference:$('#linkReference').value.trim(),currency:'APX',status:'pending',token,createdAt:serverTimestamp()};
+  const merchantReference=$('#linkReference').value.trim()||createReference('ORDER');
+  const payload={
+    merchantUid:merchant.uid,merchantId:merchant.merchantId,merchantName:merchant.businessName,
+    title:$('#linkTitle').value.trim(),amountMinor,reference:merchantReference,
+    currency:APEXPAY_PROTOCOL.currency.code,status:APEXPAY_PROTOCOL.paymentStates.CREATED,
+    protocolVersion:APEXPAY_PROTOCOL.version,token,source:'payment_link',createdAt:serverTimestamp()
+  };
   try{
     const ref=await addDoc(collection(db,'paymentIntents'),payload);
     const url=new URL('./checkout.html',location.href);url.searchParams.set('id',ref.id);url.searchParams.set('token',token);
-    $('#generatedLink').innerHTML=`<p><strong>${escapeHtml(payload.title)}</strong> · APX ${money(amount)}</p><div class="generated-url">${escapeHtml(url.href)}</div><p><button id="copyGenerated" class="secondary">Copy link</button></p>`;
+    $('#generatedLink').innerHTML=`<p><strong>${escapeHtml(payload.title)}</strong> · ${formatAPXMinor(amountMinor)}</p><div class="generated-url">${escapeHtml(url.href)}</div><p><button id="copyGenerated" class="secondary">Copy link</button></p>`;
     $('#copyGenerated').onclick=()=>copy(url.href,'Payment link copied');
     e.target.reset();await loadPayments();
   }catch(err){toast(err.message)}
