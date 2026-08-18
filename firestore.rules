@@ -2,21 +2,36 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function merchantExists() { return signedIn() && exists(/databases/$(database)/documents/merchants/$(request.auth.uid)); }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function merchantExists() { return signedIn() && exists(/databases/$(database)/documents/merchants/$(request.auth.uid)); }
+    function ownMerchant() { return get(/databases/$(database)/documents/merchants/$(request.auth.uid)); }
+    function isPositiveMinorAmount(value) { return value is int && value > 0 && value <= 100000000000; }
+    function isOpenPaymentStatus(value) { return value == 'created' || value == 'awaiting_customer'; }
 
     match /merchants/{uid} {
       allow create: if isOwner(uid)
         && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.balance == 0
         && request.resource.data.status == 'active'
-        && request.resource.data.environment == 'sandbox';
-      allow read: if isOwner(uid);
+        && request.resource.data.environment == 'sandbox'
+        && request.resource.data.currency == 'APX'
+        && request.resource.data.protocolVersion == '1.0'
+        && request.resource.data.availableBalanceMinor == 0
+        && request.resource.data.pendingBalanceMinor == 0;
+
+      allow get: if isOwner(uid);
+      allow list: if false;
+
+      // Merchants may edit profile-safe fields only. Financial and identity fields
+      // cannot be changed by the merchant browser.
       allow update: if isOwner(uid)
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.merchantId == resource.data.merchantId
-        && request.resource.data.balance == resource.data.balance
-        && request.resource.data.status == resource.data.status;
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.environment == resource.data.environment
+        && request.resource.data.currency == resource.data.currency
+        && request.resource.data.protocolVersion == resource.data.protocolVersion
+        && request.resource.data.availableBalanceMinor == resource.data.availableBalanceMinor
+        && request.resource.data.pendingBalanceMinor == resource.data.pendingBalanceMinor;
       allow delete: if false;
     }
 
@@ -26,34 +41,51 @@ service cloud.firestore {
       allow create, update: if merchantExists()
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.merchantId == merchantId
-        && get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.merchantId == merchantId
-        && request.resource.data.businessName == get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.businessName
-        && request.resource.data.status == get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.status
-        && request.resource.data.currency == 'APX';
+        && ownMerchant().data.merchantId == merchantId
+        && request.resource.data.businessName == ownMerchant().data.businessName
+        && request.resource.data.status == ownMerchant().data.status
+        && request.resource.data.currency == 'APX'
+        && request.resource.data.protocolVersion == '1.0';
       allow delete: if false;
     }
 
     match /paymentIntents/{paymentId} {
       allow create: if merchantExists()
         && request.resource.data.merchantUid == request.auth.uid
-        && request.resource.data.merchantId == get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.merchantId
-        && request.resource.data.status == 'pending'
+        && request.resource.data.merchantId == ownMerchant().data.merchantId
+        && request.resource.data.merchantName == ownMerchant().data.businessName
         && request.resource.data.currency == 'APX'
-        && request.resource.data.amount is number
-        && request.resource.data.amount > 0
-        && request.resource.data.amount <= 1000000;
+        && request.resource.data.protocolVersion == '1.0'
+        && request.resource.data.status == 'created'
+        && isPositiveMinorAmount(request.resource.data.amountMinor)
+        && request.resource.data.reference is string
+        && request.resource.data.reference.size() >= 3
+        && request.resource.data.reference.size() <= 120
+        && request.resource.data.token is string
+        && request.resource.data.token.size() >= 32;
+
+      // Specific open checkout records may be retrieved by their random document ID.
+      // Collection enumeration stays private to the owning merchant.
       allow get: if (merchantExists() && resource.data.merchantUid == request.auth.uid)
-        || resource.data.status == 'pending';
+        || isOpenPaymentStatus(resource.data.status);
       allow list: if merchantExists() && resource.data.merchantUid == request.auth.uid;
+
+      // Merchant clients cannot mark themselves paid, settle, reverse, or alter amounts.
+      // Wallet/ledger settlement will use separately constrained shared-domain writes.
       allow update, delete: if false;
     }
 
-    // Reserved for the future shared wallet/ledger service. Browsers cannot alter these collections.
+    // Shared financial domains. V1 Merchant is read/write denied here by design.
+    // These domains are consumed by the separate Wallet and Admin applications under
+    // their own narrowly scoped rules; merchant JavaScript never receives authority.
+    match /customers/{id} { allow read, write: if false; }
     match /wallets/{id} { allow read, write: if false; }
-    match /ledgerEntries/{id} { allow read, write: if false; }
     match /transactions/{id} { allow read, write: if false; }
-    match /treasury/{id} { allow read, write: if false; }
-    match /admin/{id} { allow read, write: if false; }
+    match /ledgerEntries/{id} { allow read, write: if false; }
+    match /treasuryOperations/{id} { allow read, write: if false; }
+    match /adminUsers/{id} { allow read, write: if false; }
+    match /auditEvents/{id} { allow read, write: if false; }
+    match /protocol/{id} { allow read: if true; allow write: if false; }
 
     match /{document=**} { allow read, write: if false; }
   }
