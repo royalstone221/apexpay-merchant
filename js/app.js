@@ -6,6 +6,7 @@ import { doc, setDoc, getDoc, collection, addDoc, query, where, orderBy, getDocs
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 let merchant = null;
+let merchantWallet = null;
 let currentPayments = [];
 
 function toast(message){const t=$('#toast');t.textContent=message;t.classList.add('show');clearTimeout(window.__toast);window.__toast=setTimeout(()=>t.classList.remove('show'),2600)}
@@ -14,7 +15,6 @@ function randomToken(){return Array.from(crypto.getRandomValues(new Uint8Array(1
 function stateLabel(value){return String(value||'created').replaceAll('_',' ').toUpperCase()}
 function displayAmount(payment){
   if(Number.isSafeInteger(payment.amountMinor)) return formatAPXMinor(payment.amountMinor);
-  // Temporary compatibility for any old sandbox documents created before protocol v1.
   const legacy=Number(payment.amount||0);
   return `${APEXPAY_PROTOCOL.currency.code} ${legacy.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 }
@@ -27,13 +27,22 @@ $$('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>{
 
 async function ensurePublicMerchant(uid,data){
   await setDoc(doc(db,'publicMerchants',data.merchantId),{
-    ownerUid:uid,
-    merchantId:data.merchantId,
-    businessName:data.businessName,
-    status:data.status,
-    currency:APEXPAY_PROTOCOL.currency.code,
-    protocolVersion:APEXPAY_PROTOCOL.version
+    ownerUid:uid,merchantId:data.merchantId,businessName:data.businessName,status:data.status,
+    currency:APEXPAY_PROTOCOL.currency.code,protocolVersion:APEXPAY_PROTOCOL.version
   },{merge:true});
+}
+
+async function ensureMerchantWallet(uid){
+  const walletRef=doc(db,'wallets',uid);
+  const snap=await getDoc(walletRef);
+  if(!snap.exists()){
+    await setDoc(walletRef,{
+      ownerUid:uid,ownerType:'merchant',currency:APEXPAY_PROTOCOL.currency.code,
+      availableBalanceMinor:0,pendingBalanceMinor:0,status:'active',
+      protocolVersion:APEXPAY_PROTOCOL.version,createdAt:serverTimestamp()
+    });
+    merchantWallet={id:uid,availableBalanceMinor:0,pendingBalanceMinor:0,status:'active'};
+  }else merchantWallet={id:snap.id,...snap.data()};
 }
 
 $('#registerForm').addEventListener('submit',async(e)=>{
@@ -46,10 +55,10 @@ $('#registerForm').addEventListener('submit',async(e)=>{
     const merchantId=merchantCode(cred.user.uid);
     const data={
       ownerUid:cred.user.uid,businessName,email,merchantId,status:'active',environment:'sandbox',
-      currency:APEXPAY_PROTOCOL.currency.code,availableBalanceMinor:0,pendingBalanceMinor:0,
-      protocolVersion:APEXPAY_PROTOCOL.version,createdAt:serverTimestamp()
+      currency:APEXPAY_PROTOCOL.currency.code,protocolVersion:APEXPAY_PROTOCOL.version,createdAt:serverTimestamp()
     };
     await setDoc(doc(db,'merchants',cred.user.uid),data);
+    await ensureMerchantWallet(cred.user.uid);
     await ensurePublicMerchant(cred.user.uid,data);
     toast('Merchant account created');
   }catch(err){toast(err.message.replace('Firebase: ',''))}
@@ -62,11 +71,11 @@ $('#loginForm').addEventListener('submit',async(e)=>{
 $('#logoutBtn').addEventListener('click',()=>signOut(auth));
 
 onAuthStateChanged(auth,async(user)=>{
-  if(!user){merchant=null;$('#appView').classList.add('hidden');$('#authView').classList.remove('hidden');return}
+  if(!user){merchant=null;merchantWallet=null;$('#appView').classList.add('hidden');$('#authView').classList.remove('hidden');return}
   const snap=await getDoc(doc(db,'merchants',user.uid));
   if(!snap.exists()){toast('Merchant profile is missing');await signOut(auth);return}
   merchant={uid:user.uid,...snap.data()};
-  try{await ensurePublicMerchant(user.uid,merchant)}catch{}
+  try{await ensureMerchantWallet(user.uid);await ensurePublicMerchant(user.uid,merchant)}catch(err){toast('Account financial profile needs attention')}
   $('#authView').classList.add('hidden');$('#appView').classList.remove('hidden');
   bindMerchant();await loadPayments();
 });
@@ -75,7 +84,7 @@ function bindMerchant(){
   const name=merchant.businessName||'Merchant';
   $('#merchantName').textContent=name;$('#merchantInitial').textContent=name[0].toUpperCase();$('#merchantId').textContent=merchant.merchantId;
   $('#settingsBusinessName').textContent=name;$('#settingsEmail').textContent=merchant.email;$('#settingsMerchantId').textContent=merchant.merchantId;
-  $('#balance').textContent=formatAPXMinor(Number.isSafeInteger(merchant.availableBalanceMinor)?merchant.availableBalanceMinor:0).replace('APX ','');
+  $('#balance').textContent=formatAPXMinor(Number.isSafeInteger(merchantWallet?.availableBalanceMinor)?merchantWallet.availableBalanceMinor:0).replace('APX ','');
   $('#integrationCode').textContent=`ApexPay.open({\n  merchantId: '${merchant.merchantId}',\n  amount: 100.00,\n  reference: 'ORDER-1001'\n});`;
 }
 
