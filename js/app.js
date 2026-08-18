@@ -18,6 +18,16 @@ $$('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>{
   $('#registerForm').classList.toggle('hidden',btn.dataset.authTab!=='register');
 }));
 
+async function ensurePublicMerchant(uid,data){
+  await setDoc(doc(db,'publicMerchants',data.merchantId),{
+    ownerUid:uid,
+    merchantId:data.merchantId,
+    businessName:data.businessName,
+    status:data.status,
+    currency:data.currency || 'APX'
+  },{merge:true});
+}
+
 $('#registerForm').addEventListener('submit',async(e)=>{
   e.preventDefault();
   const businessName=$('#businessName').value.trim();
@@ -26,9 +36,9 @@ $('#registerForm').addEventListener('submit',async(e)=>{
   try{
     const cred=await createUserWithEmailAndPassword(auth,email,password);
     const merchantId=merchantCode(cred.user.uid);
-    await setDoc(doc(db,'merchants',cred.user.uid),{
-      ownerUid:cred.user.uid,businessName,email,merchantId,status:'active',environment:'sandbox',currency:'APX',balance:0,createdAt:serverTimestamp()
-    });
+    const data={ownerUid:cred.user.uid,businessName,email,merchantId,status:'active',environment:'sandbox',currency:'APX',balance:0,createdAt:serverTimestamp()};
+    await setDoc(doc(db,'merchants',cred.user.uid),data);
+    await ensurePublicMerchant(cred.user.uid,data);
     toast('Merchant account created');
   }catch(err){toast(err.message.replace('Firebase: ',''))}
 });
@@ -44,6 +54,7 @@ onAuthStateChanged(auth,async(user)=>{
   const snap=await getDoc(doc(db,'merchants',user.uid));
   if(!snap.exists()){toast('Merchant profile is missing');await signOut(auth);return}
   merchant={uid:user.uid,...snap.data()};
+  try{await ensurePublicMerchant(user.uid,merchant)}catch{}
   $('#authView').classList.add('hidden');$('#appView').classList.remove('hidden');
   bindMerchant();await loadPayments();
 });
@@ -53,7 +64,7 @@ function bindMerchant(){
   $('#merchantName').textContent=name;$('#merchantInitial').textContent=name[0].toUpperCase();$('#merchantId').textContent=merchant.merchantId;
   $('#settingsBusinessName').textContent=name;$('#settingsEmail').textContent=merchant.email;$('#settingsMerchantId').textContent=merchant.merchantId;
   $('#balance').textContent=money(merchant.balance);
-  $('#integrationCode').textContent=`RoyalPay.open({\n  merchantId: '${merchant.merchantId}',\n  amount: 100.00,\n  reference: 'ORDER-1001'\n});`;
+  $('#integrationCode').textContent=`ApexPay.open({\n  merchantId: '${merchant.merchantId}',\n  amount: 100.00,\n  reference: 'ORDER-1001'\n});`;
 }
 
 $$('.nav-item[data-page]').forEach(btn=>btn.addEventListener('click',()=>go(btn.dataset.page)));
@@ -67,7 +78,6 @@ async function loadPayments(){
     const q=query(collection(db,'paymentIntents'),where('merchantUid','==',merchant.uid),orderBy('createdAt','desc'),limit(100));
     const snap=await getDocs(q);currentPayments=snap.docs.map(d=>({id:d.id,...d.data()}));renderPayments();
   }catch(err){
-    // Firestore may request an index while a new project is being configured.
     const q=query(collection(db,'paymentIntents'),where('merchantUid','==',merchant.uid),limit(100));
     const snap=await getDocs(q);currentPayments=snap.docs.map(d=>({id:d.id,...d.data()}));renderPayments();
   }
