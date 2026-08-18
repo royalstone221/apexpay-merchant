@@ -21,7 +21,8 @@ service cloud.firestore {
     }
 
     match /publicMerchants/{merchantId} {
-      allow read: if true;
+      allow get: if true;
+      allow list: if false;
       allow create, update: if merchantExists()
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.merchantId == merchantId
@@ -41,8 +42,9 @@ service cloud.firestore {
         && request.resource.data.amount is number
         && request.resource.data.amount > 0
         && request.resource.data.amount <= 1000000;
-      allow read: if (merchantExists() && resource.data.merchantUid == request.auth.uid)
-        || (resource.data.status == 'pending');
+      allow get: if (merchantExists() && resource.data.merchantUid == request.auth.uid)
+        || resource.data.status == 'pending';
+      allow list: if merchantExists() && resource.data.merchantUid == request.auth.uid;
       allow update, delete: if false;
     }
 
