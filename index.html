@@ -1,5 +1,132 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><meta name="theme-color" content="#07111f"/><title>ApexPay Merchant</title></head>
-<body><div id="app"></div><script type="module" src="/src/main.js"></script></body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="ApexPay merchant payment gateway dashboard" />
+  <title>ApexPay Merchant</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <section id="authView" class="auth-shell">
+    <div class="brand-panel">
+      <div class="brand-mark">A</div>
+      <p class="eyebrow">APEXPAY MERCHANT</p>
+      <h1>Accept the next generation of online money.</h1>
+      <p class="lede">A merchant gateway built for web stores and JavaScript applications. Create payment links, monitor transactions and integrate checkout with a few lines of code.</p>
+      <div class="feature-row"><span>01</span><p>Merchant checkout</p></div>
+      <div class="feature-row"><span>02</span><p>Hosted payment links</p></div>
+      <div class="feature-row"><span>03</span><p>JavaScript integration</p></div>
+    </div>
+
+    <div class="auth-card">
+      <div class="tabs">
+        <button class="tab active" data-auth-tab="login">Sign in</button>
+        <button class="tab" data-auth-tab="register">Create merchant</button>
+      </div>
+
+      <form id="loginForm" class="auth-form">
+        <label>Email<input id="loginEmail" type="email" autocomplete="email" required /></label>
+        <label>Password<input id="loginPassword" type="password" autocomplete="current-password" minlength="6" required /></label>
+        <button class="primary" type="submit">Enter dashboard</button>
+      </form>
+
+      <form id="registerForm" class="auth-form hidden">
+        <label>Business name<input id="businessName" required maxlength="80" /></label>
+        <label>Email<input id="registerEmail" type="email" autocomplete="email" required /></label>
+        <label>Password<input id="registerPassword" type="password" autocomplete="new-password" minlength="6" required /></label>
+        <button class="primary" type="submit">Create merchant account</button>
+      </form>
+      <p class="fine-print">ApexPay V1 uses Firebase Authentication and Firestore. Financial settlement is disabled until the shared wallet/ledger system is connected.</p>
+    </div>
+  </section>
+
+  <section id="appView" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="logo-line"><div class="brand-mark small">A</div><strong>ApexPay</strong></div>
+      <nav>
+        <button class="nav-item active" data-page="overview">Overview</button>
+        <button class="nav-item" data-page="payments">Payments</button>
+        <button class="nav-item" data-page="links">Payment links</button>
+        <button class="nav-item" data-page="developers">Developers</button>
+        <button class="nav-item" data-page="settings">Settings</button>
+      </nav>
+      <button id="logoutBtn" class="nav-item logout">Sign out</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><p class="eyebrow">MERCHANT CONSOLE</p><h2 id="pageTitle">Overview</h2></div>
+        <div class="merchant-chip"><span id="merchantInitial">M</span><div><strong id="merchantName">Merchant</strong><small id="merchantId">—</small></div></div>
+      </header>
+
+      <section id="overview" class="page active-page">
+        <div class="hero-card">
+          <div><p>Available merchant balance</p><h3><span class="currency">APX</span> <span id="balance">0.00</span></h3><small>Settlement engine not connected in this merchant-only build.</small></div>
+          <button id="newLinkHero" class="light-btn">Create payment link</button>
+        </div>
+        <div class="stats-grid">
+          <article><span>Successful payments</span><strong id="successCount">0</strong><small>All time</small></article>
+          <article><span>Pending payments</span><strong id="pendingCount">0</strong><small>Awaiting wallet approval</small></article>
+          <article><span>Payment volume</span><strong id="volume">APX 0.00</strong><small>Completed transactions</small></article>
+          <article><span>Integration mode</span><strong>Web JS</strong><small>No external payment provider</small></article>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><p class="eyebrow">ACTIVITY</p><h3>Recent payments</h3></div><button class="text-btn" data-go="payments">View all</button></div>
+          <div id="recentPayments" class="table-wrap"></div>
+        </div>
+      </section>
+
+      <section id="payments" class="page">
+        <div class="panel">
+          <div class="panel-head"><div><p class="eyebrow">TRANSACTIONS</p><h3>Payments</h3></div><button id="refreshPayments" class="secondary">Refresh</button></div>
+          <div id="paymentsTable" class="table-wrap"></div>
+        </div>
+      </section>
+
+      <section id="links" class="page">
+        <div class="split">
+          <div class="panel">
+            <p class="eyebrow">NO-CODE CHECKOUT</p><h3>Create payment link</h3>
+            <form id="paymentLinkForm" class="stack-form">
+              <label>Item / purpose<input id="linkTitle" maxlength="100" required placeholder="Premium order" /></label>
+              <label>Amount (APX)<input id="linkAmount" type="number" min="0.01" step="0.01" required placeholder="100.00" /></label>
+              <label>Reference<input id="linkReference" maxlength="60" required placeholder="ORDER-1001" /></label>
+              <button class="primary" type="submit">Generate link</button>
+            </form>
+          </div>
+          <div class="panel">
+            <p class="eyebrow">LATEST LINK</p><h3>Share checkout</h3>
+            <div id="generatedLink" class="empty-box">Create a payment link and it will appear here.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="developers" class="page">
+        <div class="panel developer-panel">
+          <p class="eyebrow">JAVASCRIPT CHECKOUT</p><h3>Copy. Paste. Accept ApexPay.</h3>
+          <p class="muted">This is a hosted-checkout launcher, not an external SDK. Your store never receives customer wallet credentials.</p>
+          <label class="code-label">1. Load the ApexPay checkout launcher</label>
+          <pre><code>&lt;script src="https://YOUR-DOMAIN/pay.js"&gt;&lt;/script&gt;</code></pre>
+          <label class="code-label">2. Open checkout from your button</label>
+          <pre><code id="integrationCode"></code></pre>
+          <button id="copyCode" class="secondary">Copy integration</button>
+        </div>
+      </section>
+
+      <section id="settings" class="page">
+        <div class="panel settings-grid">
+          <div><p class="eyebrow">MERCHANT IDENTITY</p><h3 id="settingsBusinessName">—</h3><p id="settingsEmail" class="muted">—</p></div>
+          <div><label>Merchant ID</label><div class="copy-field"><code id="settingsMerchantId">—</code><button id="copyMerchantId" class="secondary">Copy</button></div></div>
+          <div><label>Account status</label><p><span class="status active">ACTIVE</span></p></div>
+          <div><label>Environment</label><p><span class="status sandbox">SANDBOX</span></p></div>
+        </div>
+      </section>
+    </main>
+  </section>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
 </html>

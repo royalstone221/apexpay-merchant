@@ -1,101 +1,45 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
-    }
+    function signedIn() { return request.auth != null; }
+    function merchantExists() { return signedIn() && exists(/databases/$(database)/documents/merchants/$(request.auth.uid)); }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
 
-    function ownsMerchant(merchantId) {
-      return signedIn() && request.auth.uid == merchantId;
-    }
-
-    match /merchants/{merchantId} {
-      allow create: if ownsMerchant(merchantId)
-        && request.resource.data.businessName is string
-        && request.resource.data.businessName.size() >= 2
-        && request.resource.data.businessName.size() <= 120
-        && request.resource.data.email == request.auth.token.email
-        && request.resource.data.currency == 'APX'
-        && request.resource.data.status == 'active';
-
-      allow read: if ownsMerchant(merchantId);
-
-      allow update: if ownsMerchant(merchantId)
-        && request.resource.data.email == resource.data.email
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.currency == resource.data.currency
-        && request.resource.data.status == resource.data.status
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'businessName', 'contactName', 'supportEmail', 'phone', 'category',
-          'publicKey', 'updatedAt'
-        ]);
-
+    match /merchants/{uid} {
+      allow create: if isOwner(uid)
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.balance == 0
+        && request.resource.data.status == 'active'
+        && request.resource.data.environment == 'sandbox';
+      allow read: if isOwner(uid);
+      allow update: if isOwner(uid)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.merchantId == resource.data.merchantId
+        && request.resource.data.balance == resource.data.balance
+        && request.resource.data.status == resource.data.status;
       allow delete: if false;
     }
 
-    match /merchants/{merchantId}/paymentLinks/{linkId} {
-      allow read: if ownsMerchant(merchantId);
-
-      allow create: if ownsMerchant(merchantId)
-        && request.resource.data.merchantId == merchantId
-        && request.resource.data.title is string
-        && request.resource.data.title.size() >= 1
-        && request.resource.data.title.size() <= 160
-        && request.resource.data.amount is number
-        && request.resource.data.amount > 0
+    match /paymentIntents/{paymentId} {
+      allow create: if merchantExists()
+        && request.resource.data.merchantUid == request.auth.uid
+        && request.resource.data.status == 'pending'
         && request.resource.data.currency == 'APX'
-        && request.resource.data.status == 'active';
-
-      allow update: if ownsMerchant(merchantId)
-        && request.resource.data.merchantId == resource.data.merchantId
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.currency == resource.data.currency
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'title', 'description', 'amount', 'status', 'updatedAt'
-        ])
         && request.resource.data.amount is number
         && request.resource.data.amount > 0
-        && request.resource.data.status in ['active', 'disabled'];
-
-      allow delete: if ownsMerchant(merchantId);
+        && request.resource.data.amount <= 1000000;
+      allow read: if (merchantExists() && resource.data.merchantUid == request.auth.uid)
+        || (resource.data.status == 'pending');
+      allow update, delete: if false;
     }
 
-    match /merchants/{merchantId}/customers/{customerId} {
-      allow read: if ownsMerchant(merchantId);
-      allow create: if ownsMerchant(merchantId)
-        && request.resource.data.name is string
-        && request.resource.data.name.size() >= 1
-        && request.resource.data.name.size() <= 120;
-      allow update: if ownsMerchant(merchantId)
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'email', 'phone', 'updatedAt'
-        ]);
-      allow delete: if ownsMerchant(merchantId);
-    }
+    // Reserved for the future shared wallet/ledger service. Client writes are denied.
+    match /wallets/{id} { allow read, write: if false; }
+    match /ledgerEntries/{id} { allow read, write: if false; }
+    match /transactions/{id} { allow read, write: if false; }
+    match /treasury/{id} { allow read, write: if false; }
+    match /admin/{id} { allow read, write: if false; }
 
-    // The merchant frontend may inspect its ledger, but never create, edit,
-    // reverse, settle, approve, or delete transaction records.
-    match /merchants/{merchantId}/transactions/{transactionId} {
-      allow read: if ownsMerchant(merchantId);
-      allow write: if false;
-    }
-
-    // Shared financial collections are intentionally blocked from this client.
-    // The future trusted Wallet/Admin transaction layer will write them using
-    // privileged server credentials, not Firestore browser rules.
-    match /wallets/{walletId} {
-      allow read, write: if false;
-    }
-    match /ledger/{entryId} {
-      allow read, write: if false;
-    }
-    match /moneyOperations/{operationId} {
-      allow read, write: if false;
-    }
-
-    match /{document=**} {
-      allow read, write: if false;
-    }
+    match /{document=**} { allow read, write: if false; }
   }
 }

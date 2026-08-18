@@ -1,4 +1,1 @@
-{
-  "indexes": [],
-  "fieldOverrides": []
-}
+{"indexes":[{"collectionGroup":"paymentIntents","queryScope":"COLLECTION","fields":[{"fieldPath":"merchantUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]}],"fieldOverrides":[]}
