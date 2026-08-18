@@ -1,19 +1,68 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsMerchant(merchantId) {
+      return signedIn() && request.auth.uid == merchantId;
+    }
+
     match /merchants/{merchantId} {
-      allow create: if signedIn() && request.auth.uid == merchantId;
-      allow read, update: if signedIn() && request.auth.uid == merchantId;
+      allow create: if ownsMerchant(merchantId)
+        && request.resource.data.keys().hasOnly(['businessName', 'email', 'createdAt'])
+        && request.resource.data.businessName is string
+        && request.resource.data.businessName.size() >= 2
+        && request.resource.data.businessName.size() <= 120
+        && request.resource.data.email == request.auth.token.email;
+
+      allow read: if ownsMerchant(merchantId);
+
+      allow update: if ownsMerchant(merchantId)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['businessName']);
+
       allow delete: if false;
     }
+
     match /merchants/{merchantId}/paymentLinks/{linkId} {
-      allow read, create, update, delete: if signedIn() && request.auth.uid == merchantId;
+      allow read: if ownsMerchant(merchantId);
+
+      allow create: if ownsMerchant(merchantId)
+        && request.resource.data.keys().hasOnly([
+          'title', 'amount', 'currency', 'status', 'createdAt', 'merchantId'
+        ])
+        && request.resource.data.merchantId == merchantId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 160
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.currency == 'APX'
+        && request.resource.data.status == 'active';
+
+      allow update: if ownsMerchant(merchantId)
+        && request.resource.data.merchantId == resource.data.merchantId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'amount', 'status'
+        ])
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.status in ['active', 'disabled'];
+
+      allow delete: if ownsMerchant(merchantId);
     }
+
     match /merchants/{merchantId}/transactions/{transactionId} {
-      allow read: if signedIn() && request.auth.uid == merchantId;
+      allow read: if ownsMerchant(merchantId);
       allow write: if false;
     }
-    match /{document=**} { allow read, write: if false; }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }
