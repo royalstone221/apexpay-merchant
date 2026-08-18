@@ -3,17 +3,17 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
+const FIREBASE_CONFIG = Object.freeze({
+  apiKey: 'AIzaSyDSBakDHYareqA_z8p-Byb3u893FY5GyKQ',
+  authDomain: 'cediflow-62b48.firebaseapp.com',
+  projectId: 'cediflow-62b48',
+  storageBucket: 'cediflow-62b48.firebasestorage.app',
+  messagingSenderId: '398501263147',
+  appId: '1:398501263147:web:015a2c5a869513fa49b76e',
+});
 
-export const firebaseReady = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
-export const app = firebaseReady ? initializeApp(firebaseConfig) : null;
-export const auth = app ? getAuth(app) : null;
-export const db = app ? getFirestore(app) : null;
-export const storage = app ? getStorage(app) : null;
+export const firebaseReady = Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId);
+export const app = initializeApp(FIREBASE_CONFIG);
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
