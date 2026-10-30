@@ -19,6 +19,7 @@ No Stripe, Paystack, external payment API, Node server or custom backend is used
 - Merchant identity / merchant ID
 - Dashboard metrics
 - Payment-intent history
+- Read-only shared gateway transaction and merchant payout history
 - Hosted payment-link generation
 - Sandbox checkout page
 - Copy-and-paste JavaScript checkout launcher (`pay.js`)
@@ -49,4 +50,4 @@ Serve the repository with any static HTTP server. ES modules will not work corre
 </script>
 ```
 
-The current launcher opens the hosted checkout. Real wallet settlement remains intentionally disabled in this merchant-only repository.
+The current launcher opens the hosted checkout. Merchant gateway and payout history is read-only in the dashboard and is scoped to the authenticated merchant UID. Admin approval, wallet debits and payout settlement remain intentionally disabled in this merchant-only repository until a trusted, audited settlement backend is implemented.
