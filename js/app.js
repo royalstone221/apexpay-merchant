@@ -8,6 +8,8 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 let merchant = null;
 let merchantWallet = null;
 let currentPayments = [];
+let merchantGatewayRows = [];
+let merchantPayoutRows = [];
 
 function toast(message){const t=$('#toast');t.textContent=message;t.classList.add('show');clearTimeout(window.__toast);window.__toast=setTimeout(()=>t.classList.remove('show'),2600)}
 function merchantCode(uid){return `APX_${uid.slice(0,6).toUpperCase()}_${uid.slice(-4).toUpperCase()}`}
@@ -77,7 +79,7 @@ onAuthStateChanged(auth,async(user)=>{
   merchant={uid:user.uid,...snap.data()};
   try{await ensureMerchantWallet(user.uid);await ensurePublicMerchant(user.uid,merchant)}catch(err){toast('Account financial profile needs attention')}
   $('#authView').classList.add('hidden');$('#appView').classList.remove('hidden');
-  bindMerchant();await loadPayments();
+  bindMerchant();await Promise.all([loadPayments(),loadMerchantFinance()]);
 });
 
 function bindMerchant(){
@@ -91,7 +93,7 @@ function bindMerchant(){
 $$('.nav-item[data-page]').forEach(btn=>btn.addEventListener('click',()=>go(btn.dataset.page)));
 $$('[data-go]').forEach(btn=>btn.addEventListener('click',()=>go(btn.dataset.go)));
 $('#newLinkHero').addEventListener('click',()=>go('links'));
-function go(page){$$('.page').forEach(x=>x.classList.toggle('active-page',x.id===page));$$('.nav-item[data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page===page));$('#pageTitle').textContent=({overview:'Overview',payments:'Payments',links:'Payment links',developers:'Developers',settings:'Settings'})[page]||page}
+function go(page){$('.page').forEach(x=>x.classList.toggle('active-page',x.id===page));$('.nav-item[data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page===page));$('#pageTitle').textContent=({overview:'Overview',payments:'Payments',payouts:'Payouts & gateway',links:'Payment links',developers:'Developers',settings:'Settings'})[page]||page}
 
 async function loadPayments(){
   if(!merchant)return;
@@ -104,6 +106,43 @@ async function loadPayments(){
   }
 }
 $('#refreshPayments').addEventListener('click',loadPayments);
+
+async function loadMerchantFinance(){
+  if(!merchant)return;
+  const gatewayHost=$('#gatewayFinanceTable'), payoutHost=$('#merchantPayoutTable');
+  if(gatewayHost)gatewayHost.innerHTML='<div class="empty-box">Loading gateway activity…</div>';
+  if(payoutHost)payoutHost.innerHTML='<div class="empty-box">Loading payout history…</div>';
+  try{
+    const [gatewaySnap,payoutSnap]=await Promise.all([
+      getDocs(query(collection(db,'gateway_transactions'),where('merchantId','==',merchant.uid),limit(100))),
+      getDocs(query(collection(db,'merchant_withdrawals'),where('merchantId','==',merchant.uid),limit(100)))
+    ]);
+    merchantGatewayRows=gatewaySnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>timestampMillis(b.createdAt)-timestampMillis(a.createdAt));
+    merchantPayoutRows=payoutSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>timestampMillis(b.createdAt)-timestampMillis(a.createdAt));
+    renderMerchantFinance();
+  }catch(err){
+    console.error('Merchant finance read failed',err);
+    if(gatewayHost)gatewayHost.innerHTML='<div class="empty-box">Gateway activity could not be loaded. Check your account access and retry.</div>';
+    if(payoutHost)payoutHost.innerHTML='<div class="empty-box">Payout history could not be loaded. Check your account access and retry.</div>';
+    toast('Some merchant finance records could not be loaded');
+  }
+}
+function timestampMillis(value){if(value?.toDate)return value.toDate().getTime();if(value?.seconds)return value.seconds*1000;const n=Date.parse(value||'');return Number.isFinite(n)?n:0}
+function renderMerchantFinance(){
+  const gatewayHost=$('#gatewayFinanceTable'), payoutHost=$('#merchantPayoutTable');
+  if(gatewayHost){
+    const rows=merchantGatewayRows.map(r=>'<tr><td><strong>'+escapeHtml(r.reference||r.id)+'</strong></td><td>'+escapeHtml(r.description||r.title||'Gateway payment')+'</td><td>'+escapeHtml(displayFinanceAmount(r.totalAmount??r.amount??0))+'</td><td><span class="status '+escapeHtml(String(r.status||'pending').toLowerCase())+'">'+escapeHtml(stateLabel(r.status))+'</span></td><td>'+escapeHtml(formatFinanceDate(r.createdAt))+'</td></tr>').join('');
+    gatewayHost.innerHTML=rows?'<table class="payment-table"><thead><tr><th>Reference</th><th>Description</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty-box">No gateway transactions found.</div>';
+  }
+  if(payoutHost){
+    const rows=merchantPayoutRows.map(r=>'<tr><td><strong>'+escapeHtml(r.id)+'</strong></td><td>'+escapeHtml(displayFinanceAmount(r.amount||0))+'</td><td>'+escapeHtml(r.phone||'—')+'</td><td><span class="status '+escapeHtml(String(r.status||'pending').toLowerCase())+'">'+escapeHtml(stateLabel(r.status))+'</span></td><td>'+escapeHtml(formatFinanceDate(r.createdAt))+'</td></tr>').join('');
+    payoutHost.innerHTML=rows?'<table class="payment-table"><thead><tr><th>Request</th><th>Amount</th><th>Payout phone</th><th>Status</th><th>Created</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty-box">No merchant payout requests found.</div>';
+  }
+}
+function displayFinanceAmount(value){const n=Number(value);return 'APX '+(Number.isFinite(n)?n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'0.00')}
+function formatFinanceDate(value){const n=timestampMillis(value);return n?new Date(n).toLocaleString():'—'}
+$('#refreshFinance')?.addEventListener('click',loadMerchantFinance);
+
 
 function renderPayments(){
   const settled=currentPayments.filter(x=>x.status===APEXPAY_PROTOCOL.paymentStates.SETTLED);
