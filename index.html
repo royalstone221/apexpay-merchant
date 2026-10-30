@@ -49,6 +49,7 @@
       <nav>
         <button class="nav-item active" data-page="overview">Overview</button>
         <button class="nav-item" data-page="payments">Payments</button>
+        <button class="nav-item" data-page="payouts">Payouts & gateway</button>
         <button class="nav-item" data-page="links">Payment links</button>
         <button class="nav-item" data-page="developers">Developers</button>
         <button class="nav-item" data-page="settings">Settings</button>
@@ -84,6 +85,11 @@
           <div class="panel-head"><div><p class="eyebrow">TRANSACTIONS</p><h3>Payments</h3></div><button id="refreshPayments" class="secondary">Refresh</button></div>
           <div id="paymentsTable" class="table-wrap"></div>
         </div>
+      </section>
+
+      <section id="payouts" class="page">
+        <div class="panel"><div class="panel-head"><div><p class="eyebrow">MERCHANT FINANCE</p><h3>Gateway transactions</h3></div><button id="refreshFinance" class="secondary">Refresh</button></div><div id="gatewayFinanceTable" class="table-wrap"><div class="empty-box">Loading gateway activity…</div></div></div>
+        <div class="panel"><div class="panel-head"><div><p class="eyebrow">PAYOUT HISTORY</p><h3>Merchant withdrawals</h3></div></div><div id="merchantPayoutTable" class="table-wrap"><div class="empty-box">Loading payout history…</div></div><p class="fine-print">Payouts are displayed from the shared Apex records. This panel is read-only: payout approval, wallet debits and settlement must be performed through the audited Admin workflow.</p></div>
       </section>
 
       <section id="links" class="page">
